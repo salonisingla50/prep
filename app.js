@@ -7,7 +7,7 @@ const CFG = {
   EXAM_DAY: '2026-11-29',
   TOTAL: 30,
   DEFAULT_MINUTES: 10,      // per section, if not set in the Exams sheet
-  STORE: 'tspPrep.attempts.v1',
+  PENDING: 'tspPrep.pending.v1',
   UNLOCK: 'tspPrep.unlocked.v1',
   SYNC_URL: 'https://script.google.com/macros/s/AKfycbwkEMZvGByoay3AelNGvdeDH8N5oU1GfN8lLAzWXMYFCIQdHPDT5C3J0_C7ZHJkWaw_/exec'
 };
@@ -29,40 +29,34 @@ const fmtDay = s => parseYMD(s).toLocaleDateString('en-IN', { weekday: 'short', 
 const dt = ts => new Date(ts).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
 
 const store = {
-  get() { try { return JSON.parse(localStorage.getItem(CFG.STORE)) || []; } catch { return []; } },
-  set(list) { localStorage.setItem(CFG.STORE, JSON.stringify(list)); },
+  attempts: [],
+  get() { return this.attempts; },
+  set(list) { this.attempts = list; },
+  pending() {
+    try { return JSON.parse(localStorage.getItem(CFG.PENDING)) || []; }
+    catch { return []; }
+  },
+  setPending(list) { localStorage.setItem(CFG.PENDING, JSON.stringify(list)); },
   async request(url, options) {
-    const res = await fetch(url, options);
+    const res = await fetch(url, { cache: 'no-store', ...options });
     if (!res.ok) throw new Error('Shared history is unavailable');
     const data = await res.json();
     if (data.error || !Array.isArray(data.attempts)) throw new Error(data.error || 'Bad shared-history response');
     return data.attempts;
   },
   async sync() {
-    if (!CFG.SYNC_URL) return this.get();
+    if (!CFG.SYNC_URL) { syncMessage = 'Shared history is not configured.'; return; }
     try {
-      let attempts = await this.request(`${CFG.SYNC_URL}?code=${encodeURIComponent(CFG.CODE)}`);
-      const localOnly = this.get().filter(a => !attempts.some(b => String(b.id) === String(a.id)));
-      for (const attempt of localOnly) {
-        attempts = await this.request(CFG.SYNC_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'save', code: CFG.CODE, attempt })
-        });
-      }
+      const attempts = await this.request(`${CFG.SYNC_URL}?code=${encodeURIComponent(CFG.CODE)}&v=${Date.now()}`);
       this.set(attempts);
+      this.setPending(this.pending().filter(a => !attempts.some(b => String(b.id) === String(a.id))));
       syncMessage = '';
-      return attempts;
     } catch (err) {
       console.warn('Shared history sync failed', err);
-      syncMessage = 'Shared history is unavailable. Results are saved only on this device.';
-      return this.get();
+      syncMessage = 'Could not load shared history. Refresh to try again.';
     }
   },
   async add(a) {
-    const list = this.get();
-    list.push(a); this.set(list);
-    if (!CFG.SYNC_URL) return list;
     try {
       const attempts = await this.request(CFG.SYNC_URL, {
         method: 'POST',
@@ -70,13 +64,24 @@ const store = {
         body: JSON.stringify({ action: 'save', code: CFG.CODE, attempt: a })
       });
       this.set(attempts);
-      syncMessage = '';
-      return attempts;
+      this.setPending(this.pending().filter(x => String(x.id) !== String(a.id)));
+      syncMessage = this.pending().length ? 'An exam is pending upload. It is not in shared history yet.' : '';
+      return true;
     } catch (err) {
       console.warn('Shared history save failed', err);
-      syncMessage = 'Shared history is unavailable. Results are saved only on this device.';
-      return list;
+      const pending = this.pending();
+      if (!pending.some(x => String(x.id) === String(a.id))) pending.push(a);
+      this.setPending(pending);
+      syncMessage = 'An exam is pending upload. It is not in shared history yet.';
+      return false;
     }
+  },
+  async retryPending() {
+    for (const attempt of this.pending()) {
+      if (!await this.add(attempt)) return false;
+    }
+    await this.sync();
+    return true;
   }
 };
 
@@ -156,6 +161,7 @@ async function boot() {
     return;
   }
   await store.sync();
+  if (store.pending().length) syncMessage = 'An exam is pending upload. It is not in shared history yet.';
   go('exams');
 }
 
@@ -170,8 +176,19 @@ function daysLeft() {
 function shell(inner, active) {
   app.innerHTML = `<header><div class="brand">SI Prep</div><div class="days">${daysLeft()}</div></header>
     <nav>${['exams', 'history', 'progress'].map(t => `<button data-t="${t}" class="${t === active ? 'on' : ''}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</nav>
-    <main>${syncMessage ? `<p class="err small">${esc(syncMessage)}</p>` : ''}${inner}</main>`;
-  app.querySelectorAll('nav button').forEach(b => b.onclick = () => go(b.dataset.t));
+    <main>${syncMessage ? `<p class="err small">${esc(syncMessage)}${store.pending().length ? ' <button class="link" id="retry-sync">Retry save</button>' : ''}</p>` : ''}${inner}</main>`;
+  app.querySelectorAll('nav button').forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    await store.sync();
+    if (store.pending().length) syncMessage = 'An exam is pending upload. It is not in shared history yet.';
+    go(b.dataset.t);
+  });
+  const retry = $('#retry-sync');
+  if (retry) retry.onclick = async () => {
+    retry.disabled = true;
+    await store.retryPending();
+    go(active);
+  };
   window.scrollTo(0, 0);
 }
 
@@ -301,6 +318,8 @@ function attemptBody(a, showScore) {
 }
 
 async function finishExam() {
+  if (cur.saving) return;
+  cur.saving = true;
   const a = {
     id: Date.now(), exam: cur.n, ts: new Date().toISOString(), date: today(),
     sections: cur.results,
@@ -308,9 +327,11 @@ async function finishExam() {
     correct: cur.results.reduce((s, r) => s + r.correct, 0),
     endedEarly: !!cur.endedEarly
   };
-  await store.add(a);
+  const saved = await store.add(a);
   stopTimer();
-  shell(`<h2>Exam ${a.exam} ${a.endedEarly ? 'ended early' : 'complete'}</h2>${attemptBody(a, true)}
+  shell(`<h2>Exam ${a.exam} ${a.endedEarly ? 'ended early' : 'complete'}</h2>
+    <p class="${saved ? 'ok' : 'err'} small">${saved ? 'Saved to shared history.' : 'Not saved to the shared Sheet yet. Use Retry save above.'}</p>
+    ${attemptBody(a, true)}
     <div class="row"><button class="btn" id="home">Back to exams</button></div>`, 'exams');
   cur = null;
   $('#home').onclick = () => go('exams');
