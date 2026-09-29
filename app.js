@@ -46,18 +46,24 @@ const store = {
   },
   async sync() {
     if (!CFG.SYNC_URL) { this.set([]); syncMessage = 'Shared history is not configured.'; return false; }
-    try {
-      const attempts = await this.request(`${CFG.SYNC_URL}?code=${encodeURIComponent(CFG.CODE)}&v=${Date.now()}`);
-      this.set(attempts);
-      this.setPending(this.pending().filter(a => !attempts.some(b => String(b.id) === String(a.id))));
-      syncMessage = '';
-      return true;
-    } catch (err) {
-      console.warn('Shared history sync failed', err);
-      this.set([]);
-      syncMessage = 'Could not load shared history. Refresh to try again.';
-      return false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const attempts = await this.request(`${CFG.SYNC_URL}?code=${encodeURIComponent(CFG.CODE)}&v=${Date.now()}`);
+        this.set(attempts);
+        this.setPending(this.pending().filter(a => !attempts.some(b => String(b.id) === String(a.id))));
+        syncMessage = '';
+        return true;
+      } catch (err) {
+        if (attempt === 0 && err.message !== 'Unauthorised') {
+          await new Promise(resolve => setTimeout(resolve, 700));
+          continue;
+        }
+        console.warn('Shared history sync failed', err);
+      }
     }
+    this.set([]);
+    syncMessage = 'Could not load shared history.';
+    return false;
   },
   async add(a) {
     try {
@@ -178,7 +184,7 @@ function daysLeft() {
 function shell(inner, active) {
   app.innerHTML = `<header><div class="brand">SI Prep</div><div class="days">${daysLeft()}</div></header>
     <nav>${['exams', 'history', 'progress'].map(t => `<button data-t="${t}" class="${t === active ? 'on' : ''}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</nav>
-    <main>${syncMessage ? `<p class="err small">${esc(syncMessage)}${store.pending().length ? ' <button class="link" id="retry-sync">Retry save</button>' : ''}</p>` : ''}${inner}</main>`;
+    <main>${syncMessage ? `<p class="err small">${esc(syncMessage)} <button class="link" id="retry-sync">${store.pending().length ? 'Retry save' : 'Retry connection'}</button></p>` : ''}${inner}</main>`;
   app.querySelectorAll('nav button').forEach(b => b.onclick = async () => {
     b.disabled = true;
     await store.sync();
@@ -188,7 +194,8 @@ function shell(inner, active) {
   const retry = $('#retry-sync');
   if (retry) retry.onclick = async () => {
     retry.disabled = true;
-    await store.retryPending();
+    if (store.pending().length) await store.retryPending();
+    else await store.sync();
     go(active);
   };
   window.scrollTo(0, 0);
