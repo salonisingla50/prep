@@ -207,7 +207,7 @@ function showIntro(n) {
     <p class="muted small">The timer starts with each section. When it ends, the section is submitted automatically.</p>
     <div class="row"><button class="btn ghost" id="back">Back</button><button class="btn" id="go">Start</button></div>`, 'exams');
   $('#back').onclick = () => go('exams');
-  $('#go').onclick = () => { cur = { n, ex, si: 0, results: [] }; runSection(); };
+  $('#go').onclick = () => { cur = { n, ex, si: 0, results: [], endedEarly: false }; runSection(); };
 }
 
 /* ---------- Taking a section ---------- */
@@ -286,9 +286,12 @@ function showSectionResult(r) {
     <p class="muted">${wrong} wrong · ${r.skipped} skipped${r.timedOut ? ' · time up' : ''}</p>
     ${r.items.length ? '<h3>Wrong or skipped</h3>' : ''}
     ${wrongList(r.items)}
-    <div class="foot"><span></span><button class="btn" id="next">${last ? 'Finish exam' : 'Next section'}</button></div></div>`;
+    <div class="foot">${last ? '<span></span>' : '<button class="link" id="finish">Finish exam now</button>'}<button class="btn" id="next">${last ? 'Finish exam' : 'Next section'}</button></div></div>`;
   $('#exit').onclick = exitExam;
   $('#next').onclick = () => { if (last) finishExam(); else { cur.si++; runSection(); } };
+  if (!last) $('#finish').onclick = () => {
+    if (confirm('Finish now? Completed sections will be saved.')) { cur.endedEarly = true; finishExam(); }
+  };
   window.scrollTo(0, 0);
 }
 
@@ -302,11 +305,12 @@ async function finishExam() {
     id: Date.now(), exam: cur.n, ts: new Date().toISOString(), date: today(),
     sections: cur.results,
     total: cur.results.reduce((s, r) => s + r.total, 0),
-    correct: cur.results.reduce((s, r) => s + r.correct, 0)
+    correct: cur.results.reduce((s, r) => s + r.correct, 0),
+    endedEarly: !!cur.endedEarly
   };
   await store.add(a);
   stopTimer();
-  shell(`<h2>Exam ${a.exam} complete</h2>${attemptBody(a, true)}
+  shell(`<h2>Exam ${a.exam} ${a.endedEarly ? 'ended early' : 'complete'}</h2>${attemptBody(a, true)}
     <div class="row"><button class="btn" id="home">Back to exams</button></div>`, 'exams');
   cur = null;
   $('#home').onclick = () => go('exams');
@@ -316,7 +320,7 @@ async function finishExam() {
 function renderHistory() {
   const list = store.get().slice().reverse();
   shell(list.length
-    ? list.map(a => `<details><summary><span><b>Exam ${a.exam}</b> <span class="muted">· ${dt(a.ts)}</span></span><span><b>${a.correct}/${a.total}</b> <span class="muted">${pct(a.correct, a.total)}%</span></span></summary><div>${attemptBody(a, false)}</div></details>`).join('')
+    ? list.map(a => `<details><summary><span><b>Exam ${a.exam}</b> <span class="muted">· ${dt(a.ts)}${a.endedEarly ? ' · ended early' : ''}</span></span><span><b>${a.correct}/${a.total}</b> <span class="muted">${pct(a.correct, a.total)}%</span></span></summary><div>${attemptBody(a, false)}</div></details>`).join('')
     : '<p class="muted">No attempts yet.</p>', 'history');
 }
 
