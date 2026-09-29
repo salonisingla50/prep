@@ -41,7 +41,15 @@ const store = {
   async sync() {
     if (!CFG.SYNC_URL) return this.get();
     try {
-      const attempts = await this.request(`${CFG.SYNC_URL}?code=${encodeURIComponent(CFG.CODE)}`);
+      let attempts = await this.request(`${CFG.SYNC_URL}?code=${encodeURIComponent(CFG.CODE)}`);
+      const localOnly = this.get().filter(a => !attempts.some(b => String(b.id) === String(a.id)));
+      for (const attempt of localOnly) {
+        attempts = await this.request(CFG.SYNC_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'save', code: CFG.CODE, attempt })
+        });
+      }
       this.set(attempts);
       return attempts;
     } catch (err) {
