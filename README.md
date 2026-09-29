@@ -16,6 +16,15 @@ This is a static, mobile-first practice-exam site for the Telangana Police SI pr
 3. Add or update that exam's `Unlock Date` and `Minutes Per Section` on the `Exams` sheet. Missing schedule rows use the app defaults.
 4. Commit and push the updated workbook. The website fetches it with a cache-buster on every load.
 
-## Attempt data
+## Shared attempt history
 
-Completed attempts are intentionally stored in the learner's browser using localStorage, so the static site needs no backend and attempts remain private. The `Attempts` workbook sheet is a blank reference/archive layout; GitHub Pages cannot automatically write browser data to it.
+The shared Google Sheet is [Telangana SI Prep data](https://docs.google.com/spreadsheets/d/10umc1V8iAGp4wrD5IUpVuUeFgO_G8z9YFAjvj0CcRxA/edit). Its `Attempts` tab stores every completed attempt, including the question-level history used by the website.
+
+To connect the website to it:
+
+1. Open the Sheet, then choose **Extensions → Apps Script**.
+2. Replace the default script with the contents of `Code.gs` from this repository and save it.
+3. Choose **Deploy → New deployment → Web app**. Set **Execute as** to yourself and **Who has access** to anyone, then deploy and authorize it.
+4. Copy the resulting `/exec` URL into `SYNC_URL` near the top of `app.js`, commit, and push that one-line change.
+
+Both laptops will then load the same History and Progress data. The local browser copy remains as an offline fallback.

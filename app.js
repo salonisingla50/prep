@@ -8,7 +8,9 @@ const CFG = {
   TOTAL: 30,
   DEFAULT_MINUTES: 10,      // per section, if not set in the Exams sheet
   STORE: 'tspPrep.attempts.v1',
-  UNLOCK: 'tspPrep.unlocked.v1'
+  UNLOCK: 'tspPrep.unlocked.v1',
+  // Paste the Google Apps Script web-app URL here after deploying Code.gs.
+  SYNC_URL: ''
 };
 const L = 'ABCD';
 
@@ -29,7 +31,42 @@ const dt = ts => new Date(ts).toLocaleString('en-IN', { day: 'numeric', month: '
 
 const store = {
   get() { try { return JSON.parse(localStorage.getItem(CFG.STORE)) || []; } catch { return []; } },
-  add(a) { const l = this.get(); l.push(a); localStorage.setItem(CFG.STORE, JSON.stringify(l)); }
+  set(list) { localStorage.setItem(CFG.STORE, JSON.stringify(list)); },
+  async request(url, options) {
+    const res = await fetch(url, options);
+    if (!res.ok) throw new Error('Shared history is unavailable');
+    const data = await res.json();
+    if (data.error || !Array.isArray(data.attempts)) throw new Error(data.error || 'Bad shared-history response');
+    return data.attempts;
+  },
+  async sync() {
+    if (!CFG.SYNC_URL) return this.get();
+    try {
+      const attempts = await this.request(`${CFG.SYNC_URL}?code=${encodeURIComponent(CFG.CODE)}`);
+      this.set(attempts);
+      return attempts;
+    } catch (err) {
+      console.warn('Shared history sync failed', err);
+      return this.get();
+    }
+  },
+  async add(a) {
+    const list = this.get();
+    list.push(a); this.set(list);
+    if (!CFG.SYNC_URL) return list;
+    try {
+      const attempts = await this.request(CFG.SYNC_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'save', code: CFG.CODE, attempt: a })
+      });
+      this.set(attempts);
+      return attempts;
+    } catch (err) {
+      console.warn('Shared history save failed', err);
+      return list;
+    }
+  }
 };
 
 let DATA = null, cur = null, timer = null;
@@ -107,6 +144,7 @@ async function boot() {
     app.innerHTML = `<p class="center">Couldn't load questions.xlsx<br><span class="muted small">${esc(e.message)}. Open the site from GitHub Pages or a local server, not by double-clicking index.html.</span></p>`;
     return;
   }
+  await store.sync();
   go('exams');
 }
 
@@ -248,14 +286,14 @@ function attemptBody(a, showScore) {
     ${a.sections.map(s => `<details><summary><span>${esc(s.name)}</span><span><b>${s.correct}/${s.total}</b> <span class="muted">${s.total - s.correct} wrong</span></span></summary><div>${wrongList(s.items)}</div></details>`).join('')}`;
 }
 
-function finishExam() {
+async function finishExam() {
   const a = {
     id: Date.now(), exam: cur.n, ts: new Date().toISOString(), date: today(),
     sections: cur.results,
     total: cur.results.reduce((s, r) => s + r.total, 0),
     correct: cur.results.reduce((s, r) => s + r.correct, 0)
   };
-  store.add(a);
+  await store.add(a);
   stopTimer();
   shell(`<h2>Exam ${a.exam} complete</h2>${attemptBody(a, true)}
     <div class="row"><button class="btn" id="home">Back to exams</button></div>`, 'exams');
