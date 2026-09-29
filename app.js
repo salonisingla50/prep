@@ -51,9 +51,11 @@ const store = {
         });
       }
       this.set(attempts);
+      syncMessage = '';
       return attempts;
     } catch (err) {
       console.warn('Shared history sync failed', err);
+      syncMessage = 'Shared history is unavailable. Results are saved only on this device.';
       return this.get();
     }
   },
@@ -68,15 +70,17 @@ const store = {
         body: JSON.stringify({ action: 'save', code: CFG.CODE, attempt: a })
       });
       this.set(attempts);
+      syncMessage = '';
       return attempts;
     } catch (err) {
       console.warn('Shared history save failed', err);
+      syncMessage = 'Shared history is unavailable. Results are saved only on this device.';
       return list;
     }
   }
 };
 
-let DATA = null, cur = null, timer = null;
+let DATA = null, cur = null, timer = null, syncMessage = '';
 
 /* ---------- Load questions from Excel ---------- */
 const normRow = r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k.toLowerCase().replace(/[^a-z]/g, ''), v]));
@@ -166,7 +170,7 @@ function daysLeft() {
 function shell(inner, active) {
   app.innerHTML = `<header><div class="brand">SI Prep</div><div class="days">${daysLeft()}</div></header>
     <nav>${['exams', 'history', 'progress'].map(t => `<button data-t="${t}" class="${t === active ? 'on' : ''}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</nav>
-    <main>${inner}</main>`;
+    <main>${syncMessage ? `<p class="err small">${esc(syncMessage)}</p>` : ''}${inner}</main>`;
   app.querySelectorAll('nav button').forEach(b => b.onclick = () => go(b.dataset.t));
   window.scrollTo(0, 0);
 }
