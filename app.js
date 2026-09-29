@@ -45,15 +45,18 @@ const store = {
     return data.attempts;
   },
   async sync() {
-    if (!CFG.SYNC_URL) { syncMessage = 'Shared history is not configured.'; return; }
+    if (!CFG.SYNC_URL) { this.set([]); syncMessage = 'Shared history is not configured.'; return false; }
     try {
       const attempts = await this.request(`${CFG.SYNC_URL}?code=${encodeURIComponent(CFG.CODE)}&v=${Date.now()}`);
       this.set(attempts);
       this.setPending(this.pending().filter(a => !attempts.some(b => String(b.id) === String(a.id))));
       syncMessage = '';
+      return true;
     } catch (err) {
       console.warn('Shared history sync failed', err);
+      this.set([]);
       syncMessage = 'Could not load shared history. Refresh to try again.';
+      return false;
     }
   },
   async add(a) {
@@ -80,8 +83,7 @@ const store = {
     for (const attempt of this.pending()) {
       if (!await this.add(attempt)) return false;
     }
-    await this.sync();
-    return true;
+    return this.sync();
   }
 };
 
