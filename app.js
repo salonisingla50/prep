@@ -9,8 +9,7 @@ const CFG = {
   DEFAULT_MINUTES: 10,      // per section, if not set in the Exams sheet
   STORE: 'tspPrep.attempts.v1',
   UNLOCK: 'tspPrep.unlocked.v1',
-  // Paste the Google Apps Script web-app URL here after deploying Code.gs.
-  SYNC_URL: ''
+  SYNC_URL: 'https://script.google.com/macros/s/AKfycbwkEMZvGByoay3AelNGvdeDH8N5oU1GfN8lLAzWXMYFCIQdHPDT5C3J0_C7ZHJkWaw_/exec'
 };
 const L = 'ABCD';
 
