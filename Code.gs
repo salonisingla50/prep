@@ -1,12 +1,13 @@
-/* Google Apps Script web app for the shared SI Prep history.
- * Deploy this script from the Google Sheet listed in README.md.
- */
+/* Google Apps Script web app for questions, schedule, and shared attempts. */
 const SPREADSHEET_ID = '10umc1V8iAGp4wrD5IUpVuUeFgO_G8z9YFAjvj0CcRxA';
 const SHEET_NAME = 'Attempts';
 const ACCESS_CODE = '2911';
 
 function doGet(e) {
   if (!authorised_(e.parameter)) return json_({ error: 'Unauthorised' });
+  if (e.parameter.action === 'data') {
+    return json_({ questions: sheetRows_('Questions'), exams: sheetRows_('Exams') });
+  }
   return json_({ attempts: getAttempts_() });
 }
 
@@ -50,6 +51,12 @@ function sheet_() {
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SHEET_NAME);
   if (!sheet) throw new Error(`Missing ${SHEET_NAME} sheet`);
   return sheet;
+}
+
+function sheetRows_(name) {
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(name);
+  if (!sheet) throw new Error(`Missing ${name} sheet`);
+  return sheet.getDataRange().getDisplayValues();
 }
 
 function getAttempts_() {

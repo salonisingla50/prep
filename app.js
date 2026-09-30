@@ -95,7 +95,7 @@ const store = {
 
 let DATA = null, cur = null, timer = null, syncMessage = '';
 
-/* ---------- Load questions from Excel ---------- */
+/* ---------- Load questions and schedule ---------- */
 const normRow = r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k.toLowerCase().replace(/[^a-z]/g, ''), v]));
 
 function cellToYMD(v) {
@@ -113,10 +113,35 @@ function cellToYMD(v) {
 }
 
 async function loadData() {
-  const res = await fetch('questions.xlsx?v=' + Date.now());
-  if (!res.ok) throw new Error('questions.xlsx not found');
-  const wb = XLSX.read(await res.arrayBuffer(), { type: 'array' });
-  const rows = name => wb.Sheets[name] ? XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: '' }).map(normRow) : [];
+  let rows;
+  if (CFG.SYNC_URL) {
+    let data;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const url = `${CFG.SYNC_URL}?action=data&code=${encodeURIComponent(CFG.CODE)}&v=${Date.now()}`;
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) throw new Error('Google Sheet is unavailable');
+        data = await res.json();
+        break;
+      } catch (err) {
+        if (attempt === 2) throw err;
+        await new Promise(resolve => setTimeout(resolve, 700));
+      }
+    }
+    if (data.error || !Array.isArray(data.questions) || !Array.isArray(data.exams)) {
+      throw new Error(data.error || 'Google Sheet question endpoint is not updated');
+    }
+    const records = table => {
+      const [headers = [], ...items] = table;
+      return items.map(cells => normRow(Object.fromEntries(headers.map((header, i) => [header, cells[i] ?? '']))));
+    };
+    rows = name => records(name === 'Questions' ? data.questions : data.exams);
+  } else {
+    const res = await fetch('questions.xlsx?v=' + Date.now());
+    if (!res.ok) throw new Error('questions.xlsx not found');
+    const wb = XLSX.read(await res.arrayBuffer(), { type: 'array' });
+    rows = name => wb.Sheets[name] ? XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: '' }).map(normRow) : [];
+  }
 
   const exams = {};
   const make = n => ({ n, unlock: addDays(CFG.START, n - 1), minutes: CFG.DEFAULT_MINUTES, sections: [] });
@@ -165,7 +190,7 @@ async function boot() {
   app.innerHTML = '<p class="center muted">Loading…</p>';
   try { DATA = await loadData(); }
   catch (e) {
-    app.innerHTML = `<p class="center">Couldn't load questions.xlsx<br><span class="muted small">${esc(e.message)}. Open the site from GitHub Pages or a local server, not by double-clicking index.html.</span></p>`;
+    app.innerHTML = `<p class="center">Couldn't load exam questions<br><span class="muted small">${esc(e.message)}. Check the Google Sheet connection and reload.</span></p>`;
     return;
   }
   await store.sync();
