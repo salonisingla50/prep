@@ -30,6 +30,7 @@ const dt = ts => new Date(ts).toLocaleString('en-IN', { day: 'numeric', month: '
 
 const store = {
   attempts: [],
+  loaded: false,
   get() { return this.attempts; },
   set(list) { this.attempts = list; },
   pending() {
@@ -50,6 +51,7 @@ const store = {
       try {
         const attempts = await this.request(`${CFG.SYNC_URL}?code=${encodeURIComponent(CFG.CODE)}&v=${Date.now()}`);
         this.set(attempts);
+        this.loaded = true;
         this.setPending(this.pending().filter(a => !attempts.some(b => String(b.id) === String(a.id))));
         syncMessage = '';
         return true;
@@ -62,6 +64,7 @@ const store = {
       }
     }
     this.set([]);
+    this.loaded = false;
     syncMessage = 'Could not load shared history.';
     return false;
   },
@@ -73,6 +76,7 @@ const store = {
         body: JSON.stringify({ action: 'save', code: CFG.CODE, attempt: a })
       });
       this.set(attempts);
+      this.loaded = true;
       this.setPending(this.pending().filter(x => String(x.id) !== String(a.id)));
       syncMessage = this.pending().length ? 'An exam is pending upload. It is not in shared history yet.' : '';
       return true;
@@ -94,6 +98,12 @@ const store = {
 };
 
 let DATA = null, cur = null, timer = null, syncMessage = '';
+let refreshing = false, viewToken = 0, refreshPromise = null;
+
+function refreshShared() {
+  if (!refreshPromise) refreshPromise = store.sync().finally(() => { refreshPromise = null; });
+  return refreshPromise;
+}
 
 /* ---------- Load questions and schedule ---------- */
 const normRow = r => Object.fromEntries(Object.entries(r).map(([k, v]) => [k.toLowerCase().replace(/[^a-z]/g, ''), v]));
@@ -193,7 +203,7 @@ async function boot() {
     app.innerHTML = `<p class="center">Couldn't load exam questions<br><span class="muted small">${esc(e.message)}. Check the Google Sheet connection and reload.</span></p>`;
     return;
   }
-  await store.sync();
+  await refreshShared();
   if (store.pending().length) syncMessage = 'An exam is pending upload. It is not in shared history yet.';
   go('exams');
 }
@@ -207,20 +217,29 @@ function daysLeft() {
 }
 
 function shell(inner, active) {
+  viewToken++;
   app.innerHTML = `<header><div class="brand">SI Prep</div><div class="days">${daysLeft()}</div></header>
     <nav>${['exams', 'history', 'progress'].map(t => `<button data-t="${t}" class="${t === active ? 'on' : ''}">${t[0].toUpperCase() + t.slice(1)}</button>`).join('')}</nav>
-    <main>${syncMessage ? `<p class="err small">${esc(syncMessage)} <button class="link" id="retry-sync">${store.pending().length ? 'Retry save' : 'Retry connection'}</button></p>` : ''}${inner}</main>`;
-  app.querySelectorAll('nav button').forEach(b => b.onclick = async () => {
-    b.disabled = true;
-    await store.sync();
-    if (store.pending().length) syncMessage = 'An exam is pending upload. It is not in shared history yet.';
-    go(b.dataset.t);
+    <main>${refreshing ? '<p class="sync-status" role="status">Refreshing shared history…</p>' : ''}${syncMessage ? `<p class="err small">${esc(syncMessage)} <button class="link" id="retry-sync">${store.pending().length ? 'Retry save' : 'Retry connection'}</button></p>` : ''}${inner}</main>`;
+  app.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+    const tab = b.dataset.t;
+    refreshing = tab !== 'exams';
+    if (refreshing && !store.loaded) shell('<p class="muted">Loading shared history…</p>', tab);
+    else go(tab);
+    if (!refreshing) return;
+    const token = viewToken;
+    refreshShared().then(() => {
+      if (viewToken !== token) return;
+      refreshing = false;
+      if (store.pending().length) syncMessage = 'An exam is pending upload. It is not in shared history yet.';
+      go(tab);
+    });
   });
   const retry = $('#retry-sync');
   if (retry) retry.onclick = async () => {
     retry.disabled = true;
     if (store.pending().length) await store.retryPending();
-    else await store.sync();
+    else await refreshShared();
     go(active);
   };
   window.scrollTo(0, 0);
@@ -373,6 +392,7 @@ async function finishExam() {
 
 /* ---------- History ---------- */
 function renderHistory() {
+  if (!store.loaded) { shell('<p class="muted">Shared history is unavailable. Use Retry connection above.</p>', 'history'); return; }
   const list = store.get().slice().reverse();
   shell(list.length
     ? list.map(a => `<details><summary><span><b>Exam ${a.exam}</b> <span class="muted">· ${dt(a.ts)}${a.endedEarly ? ' · ended early' : ''}</span></span><span><b>${a.correct}/${a.total}</b> <span class="muted">${pct(a.correct, a.total)}%</span></span></summary><div>${attemptBody(a, false)}</div></details>`).join('')
@@ -381,6 +401,7 @@ function renderHistory() {
 
 /* ---------- Progress ---------- */
 function renderProgress() {
+  if (!store.loaded) { shell('<p class="muted">Progress is unavailable until shared history loads. Use Retry connection above.</p>', 'progress'); return; }
   const at = store.get(), T = today();
   const byDate = {};
   at.forEach(a => (byDate[a.date] = byDate[a.date] || []).push(a));

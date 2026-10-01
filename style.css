@@ -25,6 +25,7 @@ header{display:flex;justify-content:space-between;align-items:baseline;padding:2
 nav{display:flex;gap:20px;border-bottom:1px solid var(--line);margin-bottom:22px}
 nav button{background:none;border:0;padding:8px 0;color:var(--mut);border-bottom:2px solid transparent;margin-bottom:-1px}
 nav button.on{color:var(--fg);border-color:var(--fg);font-weight:600}
+.sync-status{border:1px solid var(--line);border-radius:8px;padding:8px 12px;margin-bottom:14px;color:var(--mut);font-size:13px}
 
 /* buttons */
 .btn{background:var(--fg);color:var(--bg);border:0;border-radius:10px;padding:12px 22px;font-weight:600}
